@@ -756,8 +756,23 @@ SDLViewport* SDLViewport::create(render_fun render,
 
 // Implementation of SDLViewport methods
 void SDLViewport::cleanup() {
+#ifdef _WIN32
+    // On Windows, shut down the rendering thread first
+    if (renderingThread != nullptr) {
+        renderingThreadRunning.store(false);
+        // Wake up the rendering thread
+        renderCommandCV.notify_all();
+        // Wait for the thread to finish
+        SDL_WaitThread(renderingThread, nullptr);
+        renderingThread = nullptr;
+        renderingThreadId = 0;
+        // Now set the current thread as the main thread for cleanup
+        sdlMainThreadId = SDL_GetCurrentThreadID();
+    }
+#else
     if (!checkPrimaryThread()) return;
-    
+#endif
+
     std::lock_guard<std::recursive_mutex> lock(textureMutex);
     // Clean up all GL resources properly before destroying contexts
     if (uploadWindowHandle != nullptr && uploadGLContext != nullptr) {
@@ -976,12 +991,42 @@ bool SDLViewport::initialize() {
     SDL_GL_MakeCurrent(windowHandle, NULL);
     renderContextLock.unlock();
 
+#ifdef _WIN32
+    // On Windows, create a rendering thread to avoid blocking during window move/resize
+    renderingThreadRunning.store(true);
+    renderingThreadShouldExit.store(false);
+    renderingThread = SDL_CreateThread(RenderingThreadMain, "RenderingThread", this);
+    if (renderingThread == nullptr) {
+        std::string error_msg = "Failed to create rendering thread: ";
+        error_msg += SDL_GetError();
+        SDL_ClearError();
+        throw std::runtime_error(error_msg);
+    }
+
+    // Wait for rendering thread to set itself as the main SDL thread
+    while (renderingThreadId == 0) {
+        SDL_Delay(1);
+    }
+#endif
+
     return true;
 }
 
 bool SDLViewport::processEvents(int timeout_ms) {
+#ifdef _WIN32
+    // On Windows, delegate to rendering thread
+    if (renderingThreadRunning.load()) {
+        RenderCommand cmd;
+        cmd.type = RenderCommand::PROCESS_EVENTS;
+        cmd.timeout_ms = timeout_ms;
+        return executeCommandOnRenderThread(cmd);
+    }
+    // Fallback to direct execution if thread not running (shouldn't happen)
+    return processEventsInternal(timeout_ms);
+#else
+    // On non-Windows platforms, execute directly
     if (!checkPrimaryThread()) return true;
-    
+
     if (positionChangeRequested)
     {
         SDL_SetWindowPosition(windowHandle, positionX, positionY);
@@ -1354,10 +1399,23 @@ bool SDLViewport::processEvents(int timeout_ms) {
     }
 
     return need_redraw || need_refresh;
+#endif // _WIN32
 }
 
 // Update renderFrame to use member prepare_present
 bool SDLViewport::renderFrame(bool can_skip_presenting) {
+#ifdef _WIN32
+    // On Windows, delegate to rendering thread
+    if (renderingThreadRunning.load()) {
+        RenderCommand cmd;
+        cmd.type = RenderCommand::RENDER_FRAME;
+        cmd.can_skip_presenting = can_skip_presenting;
+        return executeCommandOnRenderThread(cmd);
+    }
+    // Fallback to direct execution if thread not running (shouldn't happen)
+    return renderFrameInternal(can_skip_presenting);
+#else
+    // On non-Windows platforms, execute directly
     activityDetected.store(false);
     renderContextLock.lock();
     // Note: on X11 at least, this MakeCurrent is slow
@@ -1423,8 +1481,9 @@ bool SDLViewport::renderFrame(bool can_skip_presenting) {
         return false;
     }
 
-    preparePresentFrame(); 
+    preparePresentFrame();
     return true;
+#endif // _WIN32
 }
 
 void SDLViewport::present() {
@@ -1952,3 +2011,463 @@ void SDLViewport::addWindowIcon(void* data, int width, int height,
         throw; // Re-throw the caught exception
     }
 }
+
+#ifdef _WIN32
+// Windows-specific threading implementation to avoid blocking during window move/resize
+
+bool SDLViewport::processEventsInternal(int timeout_ms) {
+    // This is the original processEvents implementation
+    // It now runs on the rendering thread on Windows
+
+    if (positionChangeRequested)
+    {
+        SDL_SetWindowPosition(windowHandle, positionX, positionY);
+        positionChangeRequested = false;
+    }
+
+    if (sizeChangeRequested)
+    {
+        dpiScale = SDL_GetWindowDisplayScale(windowHandle);
+        float logical_to_pixel_factor = SDL_GetWindowPixelDensity(windowHandle);
+        float factor = dpiScale / logical_to_pixel_factor;
+        if (dpiScale == 0. || logical_to_pixel_factor == 0.) {
+            dpiScale = 1.f;
+            factor = 1.f;
+        }
+        SDL_SetWindowMaximumSize(windowHandle, (int)(maxWidth * factor), (int)(maxHeight * factor));
+        SDL_SetWindowMinimumSize(windowHandle, (int)(minWidth * factor), (int)(minHeight * factor));
+        SDL_SetWindowSize(windowHandle, (int)(windowWidth * factor), (int)(windowHeight * factor));
+        sizeChangeRequested = false;
+    }
+
+    if (windowPropertyChangeRequested)
+    {
+        SDL_SetWindowResizable(windowHandle, windowResizable);
+        SDL_SetWindowBordered(windowHandle, windowDecorated);
+        SDL_SetWindowAlwaysOnTop(windowHandle, windowAlwaysOnTop);
+        windowPropertyChangeRequested = false;
+    }
+
+    if (titleChangeRequested)
+    {
+        SDL_SetWindowTitle(windowHandle, windowTitle.c_str());
+        titleChangeRequested = false;
+    }
+
+    if (shouldMinimize)
+    {
+        SDL_MinimizeWindow(windowHandle);
+        shouldMinimize = false;
+    }
+
+    if (shouldMaximize)
+    {
+        SDL_MaximizeWindow(windowHandle);
+        shouldMaximize = false;
+    }
+
+    if (shouldRestore)
+    {
+        SDL_RestoreWindow(windowHandle);
+        shouldRestore = false;
+    }
+
+    if (shouldShow)
+    {
+        SDL_ShowWindow(windowHandle);
+        shouldShow = false;
+    }
+
+    if (shouldHide)
+    {
+        SDL_HideWindow(windowHandle);
+        shouldHide = false;
+    }
+
+    if (shouldFullscreen)
+    {
+        SDL_SetWindowFullscreen(windowHandle, !isFullScreen);
+        shouldFullscreen = false;
+    }
+
+    SDL_Event event;
+    uint64_t start_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()
+                        ).count();
+    uint64_t stop_time = start_time + timeout_ms * 1000000;
+    auto remaining_timeout = timeout_ms;
+
+    uint64_t time_requested_refresh = UINT64_MAX;
+    uint64_t time_requested_rendering = UINT64_MAX;
+
+    SDL_PumpEvents();
+
+    while (true) {
+        bool new_events = SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST) > 0;
+        if (!new_events) {
+            if (remaining_timeout <= 0)
+                break;
+            if (activityDetected.load() || needsRefresh.load())
+                break;
+            waitCallback(callbackData);
+            bool has_event = false;
+            if (remaining_timeout > 200) {
+                has_event = SDL_WaitEventTimeout(&event, 200);
+            } else {
+                has_event = SDL_WaitEventTimeout(&event, remaining_timeout);
+                if (!has_event) {
+                    wakeCallback(callbackData);
+                    break;
+                }
+            }
+            wakeCallback(callbackData);
+            uint64_t current_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()
+            ).count();
+            remaining_timeout = (current_time < stop_time) ?
+                static_cast<int>((stop_time - current_time + 999999) / 1000000) : 0;
+            if (!has_event)
+                continue;
+            SDL_PumpEvents();
+        }
+
+        SDL_Window* event_window = SDL_GetWindowFromEvent(&event);
+        bool isOurWindowEvent = event_window == windowHandle;
+
+        if (event_window == uploadWindowHandle) {
+            continue;
+        }
+
+        if (isOurWindowEvent || event_window == nullptr) {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+            switch (event.type) {
+                case SDL_EVENT_WINDOW_MOVED:
+                    positionX = event.window.data1;
+                    positionY = event.window.data2;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_MOUSE_MOTION:
+                    activityDetected.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_MOUSE_ENTER:
+                case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                case SDL_EVENT_MOUSE_WHEEL:
+                case SDL_EVENT_TEXT_EDITING:
+                case SDL_EVENT_TEXT_INPUT:
+                case SDL_EVENT_KEY_DOWN:
+                case SDL_EVENT_KEY_UP:
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                    isFullScreen = true;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                    isFullScreen = false;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                {
+                    float new_dpi_scale = SDL_GetWindowDisplayScale(windowHandle);
+                    if (new_dpi_scale != dpiScale) {
+                        dpiScale = new_dpi_scale;
+                        hasResized = true;
+                        needsRefresh.store(true);
+                    }
+                    break;
+                }
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    frameWidth = event.window.data1;
+                    frameHeight = event.window.data2;
+                    hasResized = true;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_RESIZED:
+                    hasResized = true;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_EXPOSED:
+                case SDL_EVENT_WINDOW_DESTROYED:
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_MINIMIZED:
+                    isMinimized = true;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_MAXIMIZED:
+                    isMaximized = true;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_RESTORED:
+                    isMinimized = false;
+                    isMaximized = false;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_QUIT:
+                    killCallback(callbackData);
+                    activityDetected.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    closeCallback(callbackData);
+                    activityDetected.store(true);
+                    break;
+                case SDL_EVENT_DROP_BEGIN:
+                    dropCallback(callbackData, 0, nullptr);
+                    needsRefresh.store(true);
+                    dropPending = true;
+                    break;
+                case SDL_EVENT_DROP_FILE:
+                    dropCallback(callbackData, 1, event.drop.data);
+                    break;
+                case SDL_EVENT_DROP_TEXT:
+                    dropCallback(callbackData, 2, event.drop.data);
+                    break;
+                case SDL_EVENT_DROP_COMPLETE:
+                    dropCallback(callbackData, 3, nullptr);
+                    needsRefresh.store(true);
+                    dropPending = false;
+                    break;
+                case SDL_EVENT_DROP_POSITION:
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_SHOWN:
+                    isVisible = true;
+                    needsRefresh.store(true);
+                    break;
+                case SDL_EVENT_WINDOW_HIDDEN:
+                    isVisible = false;
+                    break;
+                default:
+                    if (event.type == UserEventType) {
+                        uint64_t current_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()
+                        ).count();
+                        if (event.user.timestamp <= current_time) {
+                            if (event.user.code == 0) {
+                                needsRefresh.store(true);
+                            } else if (event.user.code == 1) {
+                                activityDetected.store(true);
+                            }
+                        } else {
+                            if (event.user.code == 0) {
+                                if (time_requested_refresh > event.user.timestamp) {
+                                    time_requested_refresh = event.user.timestamp;
+                                }
+                            } else if (event.user.code == 1) {
+                                if (time_requested_rendering > event.user.timestamp) {
+                                    time_requested_rendering = event.user.timestamp;
+                                }
+                            }
+                            if (event.user.timestamp < stop_time) {
+                                stop_time = event.user.timestamp;
+                                remaining_timeout = static_cast<int>((stop_time - current_time + 999999) / 1000000);
+                            }
+                        }
+                    }
+                    break;
+            }
+        } else {
+            deferredEvents.push_back(event);
+        }
+    }
+
+    if (hasResized) {
+        windowWidth = (int)((float)frameWidth / dpiScale);
+        windowHeight = (int)((float)frameHeight / dpiScale);
+        hasResized = false;
+        resizeCallback(callbackData);
+    }
+
+    if (!deferredEvents.empty()) {
+        if ((int)deferredEvents.size() >= 1024) {
+            fprintf(stderr, "Warning: %d deferred events. Events are not properly flushed. Skipping...\n", (int)deferredEvents.size());
+        } else {
+            SDL_PeepEvents(deferredEvents.data(), (int)deferredEvents.size(),
+                           SDL_ADDEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        }
+        deferredEvents.clear();
+    }
+
+    if (time_requested_refresh != UINT64_MAX || time_requested_rendering != UINT64_MAX) {
+        uint64_t current_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()
+            ).count();
+        if (current_time >= time_requested_refresh) {
+            needsRefresh.store(true);
+            activityDetected.store(true);
+            time_requested_refresh = UINT64_MAX;
+            time_requested_rendering = UINT64_MAX;
+        } else if (current_time >= time_requested_rendering) {
+            activityDetected.store(true);
+            time_requested_rendering = UINT64_MAX;
+        }
+    }
+
+    bool need_refresh = needsRefresh.load();
+    bool need_redraw = activityDetected.load();
+
+    if (need_refresh) {
+        time_requested_refresh = UINT64_MAX;
+        time_requested_rendering = UINT64_MAX;
+    } else if (need_redraw) {
+        time_requested_rendering = UINT64_MAX;
+    }
+
+    if (time_requested_refresh != UINT64_MAX) {
+        SDL_Event user_event;
+        user_event.type = UserEventType;
+        user_event.user.windowID = SDL_GetWindowID(windowHandle);
+        user_event.user.timestamp = time_requested_refresh;
+        user_event.user.code = 0;
+        user_event.user.data1 = NULL;
+        user_event.user.data2 = NULL;
+        SDL_PushEvent(&user_event);
+    }
+
+    if (time_requested_rendering != UINT64_MAX) {
+        SDL_Event user_event;
+        user_event.type = UserEventType;
+        user_event.user.windowID = SDL_GetWindowID(windowHandle);
+        user_event.user.timestamp = time_requested_rendering;
+        user_event.user.code = 1;
+        user_event.user.data1 = NULL;
+        user_event.user.data2 = NULL;
+        SDL_PushEvent(&user_event);
+    }
+
+    return need_redraw || need_refresh;
+}
+
+bool SDLViewport::renderFrameInternal(bool can_skip_presenting) {
+    // This is the original renderFrame implementation
+    // It now runs on the rendering thread on Windows
+
+    activityDetected.store(false);
+    renderContextLock.lock();
+
+    if (Needs_ImGui_ImplOpenGL3_NewFrame()) {
+        SDL_GL_MakeCurrent(windowHandle, glContext);
+        ImGui_ImplOpenGL3_NewFrame();
+        SDL_GL_MakeCurrent(windowHandle, NULL);
+    }
+
+    renderContextLock.unlock();
+    ImGui_ImplSDL3_NewFrame(frameHeight, frameWidth);
+    ImGui::NewFrame();
+
+    bool does_needs_refresh = needsRefresh.load();
+    needsRefresh.store(false);
+
+    renderCallback(callbackData);
+
+    does_needs_refresh |= needsRefresh.load();
+
+    if (fastActivityCheck()) {
+        does_needs_refresh = true;
+        needsRefresh.store(true);
+    }
+
+    static bool prev_needs_refresh = true;
+
+    if (!can_skip_presenting)
+        shouldSkipPresenting = false;
+
+    can_skip_presenting &= !does_needs_refresh && !prev_needs_refresh;
+
+    prev_needs_refresh = does_needs_refresh;
+    if (does_needs_refresh)
+        activityDetected.store(true);
+
+    if (can_skip_presenting || shouldSkipPresenting) {
+        shouldSkipPresenting = false;
+        ImGui::EndFrame();
+        return false;
+    }
+
+    preparePresentFrame();
+    return true;
+}
+
+bool SDLViewport::executeCommandOnRenderThread(RenderCommand& cmd) {
+    // Send command to rendering thread and wait for completion
+    std::unique_lock<std::mutex> lock(renderCommandMutex);
+
+    // Set the command
+    currentCommand = &cmd;
+    cmd.completed.store(false);
+
+    // Notify rendering thread
+    renderCommandCV.notify_one();
+
+    // Wait for command to complete
+    renderCommandCV.wait(lock, [&cmd]() { return cmd.completed.load(); });
+
+    currentCommand = nullptr;
+
+    return cmd.result;
+}
+
+void SDLViewport::renderingThreadLoop() {
+    // Set this thread as the main SDL thread
+    sdlMainThreadId = SDL_GetCurrentThreadID();
+    renderingThreadId = SDL_GetCurrentThreadID();
+
+    while (renderingThreadRunning.load()) {
+        std::unique_lock<std::mutex> lock(renderCommandMutex);
+
+        // Wait for a command or timeout to process events
+        renderCommandCV.wait_for(lock, std::chrono::milliseconds(16), [this]() {
+            return currentCommand != nullptr || !renderingThreadRunning.load();
+        });
+
+        if (!renderingThreadRunning.load()) {
+            break;
+        }
+
+        if (currentCommand != nullptr) {
+            RenderCommand* cmd = currentCommand;
+            lock.unlock(); // Unlock while executing command
+
+            switch (cmd->type) {
+                case RenderCommand::PROCESS_EVENTS:
+                    cmd->result = processEventsInternal(cmd->timeout_ms);
+                    break;
+                case RenderCommand::RENDER_FRAME:
+                    cmd->result = renderFrameInternal(cmd->can_skip_presenting);
+                    break;
+                case RenderCommand::SHUTDOWN:
+                    renderingThreadShouldExit.store(true);
+                    cmd->result = true;
+                    break;
+                default:
+                    cmd->result = false;
+                    break;
+            }
+
+            cmd->completed.store(true);
+
+            lock.lock();
+            renderCommandCV.notify_one();
+        } else {
+            // No command, just process events with 0 timeout to keep UI responsive
+            lock.unlock();
+            processEventsInternal(0);
+        }
+    }
+}
+
+int SDLViewport::RenderingThreadMain(void* data) {
+    SDLViewport* viewport = static_cast<SDLViewport*>(data);
+    viewport->renderingThreadLoop();
+    return 0;
+}
+
+#endif // _WIN32

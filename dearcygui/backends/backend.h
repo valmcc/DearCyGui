@@ -1,5 +1,6 @@
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <vector>
 #include <string>
 #include <SDL3/SDL.h>
@@ -422,7 +423,43 @@ private:
     static std::atomic<bool> sdlInitialized;
     static std::mutex sdlInitMutex;
     static std::atomic<int> viewportCount;
-    
+
     // Event queue for forwarding events
     std::vector<SDL_Event> deferredEvents;
+
+#ifdef _WIN32
+    // Windows-specific rendering thread support
+    SDL_Thread* renderingThread = nullptr;
+    SDL_ThreadID renderingThreadId = 0;
+    std::atomic<bool> renderingThreadRunning{false};
+    std::atomic<bool> renderingThreadShouldExit{false};
+
+    // Command queue for communicating with rendering thread
+    struct RenderCommand {
+        enum Type {
+            NONE,
+            RENDER_FRAME,
+            PROCESS_EVENTS,
+            SHUTDOWN
+        };
+        Type type = NONE;
+        bool can_skip_presenting = false;
+        int timeout_ms = 0;
+        bool result = false;
+        std::atomic<bool> completed{false};
+    };
+
+    std::mutex renderCommandMutex;
+    std::condition_variable renderCommandCV;
+    RenderCommand* currentCommand = nullptr;
+
+    // Rendering thread main loop
+    static int RenderingThreadMain(void* data);
+    void renderingThreadLoop();
+
+    // Helper methods for thread communication
+    bool executeCommandOnRenderThread(RenderCommand& cmd);
+    bool processEventsInternal(int timeout_ms);
+    bool renderFrameInternal(bool can_skip_presenting);
+#endif
 };
