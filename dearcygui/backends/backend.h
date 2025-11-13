@@ -457,9 +457,7 @@ private:
     static int RenderingThreadMain(void* data);
     void renderingThreadLoop();
 
-    // Helper methods for thread communication
+    // Helper method for thread communication
     bool executeCommandOnRenderThread(RenderCommand& cmd);
-    bool processEventsInternal(int timeout_ms);
-    bool renderFrameInternal(bool can_skip_presenting);
 #endif
 };
