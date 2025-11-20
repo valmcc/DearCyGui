@@ -1,0 +1,26 @@
+diff --git a/thirdparty/implot/implot.cpp b/thirdparty/implot/implot.cpp
+index 1234567..abcdefg 100644
+--- a/thirdparty/implot/implot.cpp
++++ b/thirdparty/implot/implot.cpp
+@@ -714,7 +714,11 @@ static const float TICK_FILL_Y = 1.0f;
+ void Locator_Default(ImPlotTicker& ticker, const ImPlotRange& range, float pixels, bool vertical, ImPlotFormatter formatter, void* formatter_data) {
+     if (range.Min == range.Max)
+         return;
++    // Scale pixel budget by DPI to maintain consistent visual tick density
++    // Use ImGui's MouseCursorScale as a proxy for DPI scale
++    const float dpiScale = ImMax(1.0f, ImGui::GetStyle().MouseCursorScale);
++    const float scaledPixels = pixels / dpiScale;
+     const int nMinor        = 10;
+-    const int nMajor        = ImMax(2, (int)IM_ROUND(pixels / (vertical ? 300.0f : 400.0f)));
++    const int nMajor        = ImMax(2, (int)IM_ROUND(scaledPixels / (vertical ? 300.0f : 400.0f)));
+     const double nice_range = NiceNum(range.Size() * 0.99, false);
+     const double interval   = NiceNum(nice_range / (nMajor - 1), true);
+@@ -744,7 +748,7 @@ void Locator_Default(ImPlotTicker& ticker, const ImPlotRange& range, float pixe
+         }
+     }
+     // prune if necessary
+-    if ((!vertical && total_size.x > pixels*TICK_FILL_X) || (vertical && total_size.y > pixels*TICK_FILL_Y)) {
++    if ((!vertical && total_size.x > scaledPixels*TICK_FILL_X) || (vertical && total_size.y > scaledPixels*TICK_FILL_Y)) {
+         for (int i = first_major_idx-1; i >= idx0; i -= 2)
+             ticker.Ticks[i].ShowLabel = false;
+         for (int i = first_major_idx+1; i < ticker.TickCount(); i += 2)
