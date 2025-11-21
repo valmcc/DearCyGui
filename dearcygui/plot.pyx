@@ -2112,7 +2112,12 @@ cdef class Plot(uiItem):
         implot.GetInputMap().Pan = self._pan_button
         implot.GetInputMap().Fit = self._fit_button
         implot.GetInputMap().Menu = self._menu_button
-        implot.GetInputMap().ZoomRate = self._zoom_rate
+        # Disable zoom when ImGui wants to capture mouse (e.g., scrolling in legend popup)
+        # This prevents the plot from zooming while scrolling through a long legend
+        if imgui.GetIO().WantCaptureMouse:
+            implot.GetInputMap().ZoomRate = 0.
+        else:
+            implot.GetInputMap().ZoomRate = self._zoom_rate
         implot.GetInputMap().PanMod = self._pan_modifier
         implot.GetInputMap().ZoomMod = self._zoom_mod
         implot.GetInputMap().OverrideMod = self._override_mod
