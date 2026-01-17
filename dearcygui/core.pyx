@@ -2918,6 +2918,7 @@ cdef class Viewport(baseItem):
         self._cursor = imgui.ImGuiMouseCursor_Arrow
         self._scale = 1.
         self._kill_signal = False
+        self._disable_ctrl_tab_window_picker = False
         self.global_scale = 1. # non-zero needed for AutoFont.
         self._imgui_context = NULL
         self._implot_context = NULL
@@ -3843,6 +3844,33 @@ cdef class Viewport(baseItem):
             imgui.GetIO().ConfigFlags = imgui.GetIO().ConfigFlags & ~imgui.ImGuiConfigFlags_NavEnableKeyboard  # Disable Keyboard Controls
 
     @property
+    def disable_ctrl_tab_window_picker(self) -> bool:
+        """
+        Whether the Ctrl+Tab window picker is disabled.
+
+        When set to True, the Ctrl+Tab and Ctrl+Shift+Tab shortcuts that normally
+        show a window picker for switching between windows will be disabled.
+        This allows you to keep keyboard navigation active while preventing the
+        window picker from appearing.
+
+        Note: This only disables the window picker UI. It does not affect other
+        keyboard navigation features like Tab/Shift+Tab for cycling through items.
+
+        Default: False (window picker is enabled)
+        """
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        self.__check_alive()
+        return self._disable_ctrl_tab_window_picker
+
+    @disable_ctrl_tab_window_picker.setter
+    def disable_ctrl_tab_window_picker(self, bint value):
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        self.__check_alive()
+        self._disable_ctrl_tab_window_picker = value
+
+    @property
     def always_on_top(self) -> bool:
         """
         Whether the viewport window stays above other windows.
@@ -4403,6 +4431,10 @@ cdef class Viewport(baseItem):
         # Initialize drawing state
         imgui.SetMouseCursor(self._cursor)
         self._cursor = imgui.ImGuiMouseCursor_Arrow
+        # Disable Ctrl+Tab window picker if requested
+        if self._disable_ctrl_tab_window_picker:
+            imgui.Shortcut(imgui.ImGuiMod_Ctrl | imgui.ImGuiKey_Tab, imgui.ImGuiInputFlags_RouteGlobal)
+            imgui.Shortcut(imgui.ImGuiMod_Ctrl | imgui.ImGuiMod_Shift | imgui.ImGuiKey_Tab, imgui.ImGuiInputFlags_RouteGlobal)
         self.set_previous_states()
         if self._font is not None:
             self._font.push()

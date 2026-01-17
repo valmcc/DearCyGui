@@ -401,6 +401,7 @@ cdef class Viewport(baseItem):
     cdef double _target_refresh_time
     cdef bint _kill_signal
     cdef object _kill_exc
+    cdef bint _disable_ctrl_tab_window_picker # Disable Ctrl+Tab window picker
     cdef void* _imgui_context # imgui.ImGuiContext
     cdef void* _implot_context # implot.ImPlotContext
     ### public methods ###
