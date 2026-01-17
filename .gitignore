@@ -12,7 +12,17 @@ __pycache__/
 lib_location.txt
 version_number.txt
 dearpygui.egg-info/
+dearcygui.egg-info/
 build/
+build_FT/
+build_SDL/
+
+# Generated Cython files
+dearcygui/*.cpp
+dearcygui/utils/*.cpp
+
+# Bundled fonts
+dearcygui/*.otf
 # Ignore only subdirectories
 sandbox/*/
 src/CMakeFiles/
