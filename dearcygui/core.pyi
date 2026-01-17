@@ -10960,6 +10960,29 @@ Render one frame of the application.
 
 
     @property
+    def disable_ctrl_tab_window_picker(self) -> bool:
+        """
+        Whether the Ctrl+Tab window picker is disabled.
+
+        When set to True, the Ctrl+Tab and Ctrl+Shift+Tab shortcuts that normally
+        show a window picker for switching between windows will be disabled.
+        This allows you to keep keyboard navigation active while preventing the
+        window picker from appearing.
+
+        Note: This only disables the window picker UI. It does not affect other
+        keyboard navigation features like Tab/Shift+Tab for cycling through items.
+
+        Default: False (window picker is enabled)
+        """
+        ...
+
+
+    @disable_ctrl_tab_window_picker.setter
+    def disable_ctrl_tab_window_picker(self, value : bool):
+        ...
+
+
+    @property
     def max_height(self) -> int:
         """
         Maximum height the viewport window can be resized to.
