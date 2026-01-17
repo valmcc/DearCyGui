@@ -430,9 +430,7 @@ cdef class DrawInvisibleButton(drawingItem):
             screen_p[0] = cur_mouse_pos.x
             screen_p[1] = cur_mouse_pos.y
             self.context.viewport.screen_to_coordinate(coordinate_p, screen_p)
-            cur_mouse_pos.x = coordinate_p[0]
-            cur_mouse_pos.y = coordinate_p[1]
-            self._initial_mouse_position = cur_mouse_pos
+            self._initial_mouse_position = coordinate_p
         cdef bint dragging = False
         cdef int32_t i
         if self.state.cur.active:
@@ -440,15 +438,13 @@ cdef class DrawInvisibleButton(drawingItem):
             screen_p[0] = cur_mouse_pos.x
             screen_p[1] = cur_mouse_pos.y
             self.context.viewport.screen_to_coordinate(coordinate_p, screen_p)
-            cur_mouse_pos.x = coordinate_p[0]
-            cur_mouse_pos.y = coordinate_p[1]
-            dragging = cur_mouse_pos.x != self._initial_mouse_position.x or \
-                       cur_mouse_pos.y != self._initial_mouse_position.y
+            dragging = coordinate_p[0] != self._initial_mouse_position[0] or \
+                       coordinate_p[1] != self._initial_mouse_position[1]
             for i in range(<int>imgui.ImGuiMouseButton_COUNT):
                 self.state.cur.dragging[i] = dragging and imgui.IsMouseDown(i)
                 if dragging:
-                    self.state.cur.drag_deltas[i].x = cur_mouse_pos.x - self._initial_mouse_position.x
-                    self.state.cur.drag_deltas[i].y = cur_mouse_pos.y - self._initial_mouse_position.y
+                    self.state.cur.drag_deltas[i].x = coordinate_p[0] - self._initial_mouse_position[0]
+                    self.state.cur.drag_deltas[i].y = coordinate_p[1] - self._initial_mouse_position[1]
         else:
             for i in range(<int>imgui.ImGuiMouseButton_COUNT):
                 self.state.cur.dragging[i] = False
@@ -5338,6 +5334,49 @@ cdef class ChildWindow(uiItem): # TODO: remove label
         self._child_flags &= ~imgui.ImGuiChildFlags_ResizeY
         if value:
             self._child_flags |= imgui.ImGuiChildFlags_ResizeY
+
+    @property
+    def no_background(self):
+        """
+        Don't draw background color and outside border.
+        
+        When enabled, the child window will be transparent with no background
+        drawing. This is useful for creating overlay effects or organizing
+        layout without visible container boundaries.
+        """
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        return (self._window_flags & imgui.ImGuiWindowFlags_NoBackground) != 0
+
+    @no_background.setter
+    def no_background(self, bint value):
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        self._window_flags &= ~imgui.ImGuiWindowFlags_NoBackground
+        if value:
+            self._window_flags |= imgui.ImGuiWindowFlags_NoBackground
+
+    @property
+    def no_inputs(self):
+        """
+        Disable all mouse and navigation inputs to this window.
+        
+        When enabled, the child window becomes completely non-interactive,
+        allowing input to pass through to windows behind it. Combines
+        NoMouseInputs, NoNavInputs, and NoNavFocus flags. Useful for
+        display-only or overlay child windows.
+        """
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        return (self._window_flags & imgui.ImGuiWindowFlags_NoInputs) != 0
+
+    @no_inputs.setter
+    def no_inputs(self, bint value):
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        self._window_flags &= ~imgui.ImGuiWindowFlags_NoInputs
+        if value:
+            self._window_flags |= imgui.ImGuiWindowFlags_NoInputs
 
     cdef bint draw_item(self) noexcept nogil:
         cdef imgui.ImGuiWindowFlags flags = self._window_flags

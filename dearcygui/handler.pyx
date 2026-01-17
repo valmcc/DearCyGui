@@ -145,10 +145,10 @@ cdef bint check_state_from_list(baseHandler start_handler,
             while (<baseItem>child).prev_sibling is not None:
                 child = <PyObject *>(<baseItem>child).prev_sibling
         while (<baseHandler>child) is not None:
-            child_state = (<baseHandler>child).check_state(item)
             if not((<baseHandler>child)._enabled):
                 child = <PyObject*>((<baseHandler>child).next_sibling)
                 continue
+            child_state = (<baseHandler>child).check_state(item)
             if op == HandlerListOP.ALL:
                 current_state = current_state and child_state
                 if not(current_state):
@@ -280,11 +280,12 @@ cdef class ConditionalHandler(baseHandler):
         cdef bint current_state = True
         cdef bint child_state
         while child is not <PyObject*>None:
-            child_state = (<baseHandler>child).check_state(item)
-            child = <PyObject*>((<baseHandler>child).prev_sibling)
             if not((<baseHandler>child)._enabled):
+                child = <PyObject*>((<baseHandler>child).prev_sibling)
                 continue
+            child_state = (<baseHandler>child).check_state(item)
             current_state = current_state and child_state
+            child = <PyObject*>((<baseHandler>child).prev_sibling)
         self.last_handler_child.unlock_and_previous_siblings()
         return current_state
 
@@ -301,11 +302,12 @@ cdef class ConditionalHandler(baseHandler):
         cdef bint child_state
         # Note: we already have tested there is at least one child
         while ((<baseHandler>child).prev_sibling) is not None:
-            child_state = (<baseHandler>child).check_state(item)
-            child = <PyObject*>((<baseHandler>child).prev_sibling)
             if not((<baseHandler>child)._enabled):
+                child = <PyObject*>((<baseHandler>child).prev_sibling)
                 continue
+            child_state = (<baseHandler>child).check_state(item)
             condition_held = condition_held and child_state
+            child = <PyObject*>((<baseHandler>child).prev_sibling)
         if condition_held:
             (<baseHandler>child).run_handler(item)
         self.last_handler_child.unlock_and_previous_siblings()
@@ -2316,6 +2318,8 @@ cdef class DragDropSourceHandler(baseHandler):
 
     cdef void run_handler(self, baseItem item) noexcept nogil:
         cdef unique_lock[DCGMutex] m = unique_lock[DCGMutex](self.mutex)
+        if not(self._enabled):
+            return
         if not self.check_state(item):
             return
         cdef bint submitted = False
@@ -2508,6 +2512,8 @@ cdef class DragDropActiveHandler(baseHandler):
 
     cdef void run_handler(self, baseItem item) noexcept nogil:
         cdef unique_lock[DCGMutex] m = unique_lock[DCGMutex](self.mutex)
+        if not(self._enabled):
+            return
         if not self.check_state(item):
             return
         cdef const imgui.ImGuiPayload *payload = imgui.GetDragDropPayload()
@@ -2693,6 +2699,8 @@ cdef class DragDropTargetHandler(baseHandler):
         cdef unique_lock[DCGMutex] m = unique_lock[DCGMutex](self.mutex)
         cdef const imgui.ImGuiPayload *received_payload = NULL
         cdef int i
+        if not(self._enabled):
+            return
 
         if imgui.BeginDragDropTarget():
             if self._items.size() == 0:

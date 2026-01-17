@@ -134,8 +134,8 @@ cdef class Coord:
             read_coord(other_coord, other)
         except TypeError:
             return NotImplemented
-        other_coord[0] -= self._x
-        other_coord[1] -= self._y
+        other_coord[0] = self._x - other_coord[0]
+        other_coord[1] = self._y - other_coord[1]
         return Coord.build(other_coord)
 
     def __rsub__(self, other):
@@ -631,6 +631,19 @@ cdef class Rect:
         result[3] = self._y2 - coord[1]
         return Rect.build(result)
 
+    def __rsub__(self, other):
+        cdef double[2] coord
+        try:
+            read_coord(coord, other)
+        except TypeError:
+            return NotImplemented
+        cdef double[4] result
+        result[0] = coord[0] - self._x1
+        result[1] = coord[1] - self._y1
+        result[2] = coord[0] - self._x2
+        result[3] = coord[1] - self._y2
+        return Rect.build(result)
+
     def __isub__(self, other):
         cdef double[2] coord
         try:
@@ -751,7 +764,7 @@ cdef class Rect:
         ymin = min(self._y1, self._y2)
         xmax = max(self._x1, self._x2)
         ymax = max(self._y1, self._y2)
-        return xmin <= other_coord[0] <= xmax and ymin <= other_coord[1] <= ymax
+        return xmin <= other_coord[0] and other_coord[0] <= xmax and ymin <= other_coord[1] and other_coord[1] <= ymax
 
     # Fast instanciation from Cython
     @staticmethod
