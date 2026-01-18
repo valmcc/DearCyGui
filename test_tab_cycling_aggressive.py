@@ -1,5 +1,6 @@
 import dearcygui as dcg
 import asyncio
+import threading
 from dearcygui.utils.asyncio_helpers import (
     AsyncThreadPoolExecutor,
     run_viewport_loop,
@@ -26,8 +27,17 @@ with dcg.Window(C, label="Test Window", width=800, height=600) as window:
         plot3 = dcg.Plot(C, width=-1, height=-1)
 
 
+# Track the switch state
+switch_state = {"active": False, "counter": 0, "target_idx": None, "old_idx": None}
+
+
 def cycle_tabs(s, t, d):
     """Cycle through tabs when Tab is pressed."""
+    # Ignore if a switch is already in progress
+    if switch_state["active"]:
+        print("Switch already in progress, ignoring")
+        return
+
     print("Pressed Tab!")
     tabs = [c for c in tab_bar.children if isinstance(c, dcg.Tab)]
     if len(tabs) < 2:
@@ -46,28 +56,40 @@ def cycle_tabs(s, t, d):
     else:
         next_idx = (active_idx + 1) % len(tabs)
 
-    print(f"Switching from {tabs[active_idx].label} to {tabs[next_idx].label}")
+    print(f"Initiating switch from {tabs[active_idx].label} to {tabs[next_idx].label}")
 
-    # NEW APPROACH: Disable the tab bar itself to block ALL mouse interaction
+    # Start the switch process
+    switch_state["active"] = True
+    switch_state["counter"] = 0
+    switch_state["target_idx"] = next_idx
+    switch_state["old_idx"] = active_idx
+
+    # Disable tab bar to prevent mouse interference
     tab_bar.enabled = False
+    C.viewport.wake()
 
-    # Also explicitly set the old tab to False
-    tabs[active_idx].value = False
 
-    # Then set the new tab to True
-    tabs[next_idx].value = True
+def on_frame_render(s, t, d):
+    """Called every frame to manage the tab switch."""
+    if not switch_state["active"]:
+        return
 
-    # Schedule re-enabling the tab bar after a delay
-    def re_enable_tab_bar():
+    tabs = [c for c in tab_bar.children if isinstance(c, dcg.Tab)]
+    target_idx = switch_state["target_idx"]
+    old_idx = switch_state["old_idx"]
+
+    # Force the switch every frame
+    # First set old to False, then new to True
+    tabs[old_idx].value = False
+    tabs[target_idx].value = True
+
+    switch_state["counter"] += 1
+
+    # After 5 frames, finish the switch
+    if switch_state["counter"] >= 5:
         tab_bar.enabled = True
-        # Force the new tab value again to be sure
-        tabs[next_idx].value = True
-        C.viewport.wake()
-        print(f"Tab bar re-enabled, switched to {tabs[next_idx].label}")
-
-    # Use threading timer for delay
-    import threading
-    threading.Timer(0.05, re_enable_tab_bar).start()
+        switch_state["active"] = False
+        print(f"Switch complete to {tabs[target_idx].label}")
 
     C.viewport.wake()
 
@@ -75,7 +97,8 @@ def cycle_tabs(s, t, d):
 C.viewport.wait_for_input = False
 
 C.viewport.handlers += [
-    dcg.KeyPressHandler(C, key=dcg.Key.TAB, callback=cycle_tabs)
+    dcg.KeyPressHandler(C, key=dcg.Key.TAB, callback=cycle_tabs),
+    dcg.RenderHandler(C, callback=on_frame_render)
 ]
 
 C.viewport.initialize()
