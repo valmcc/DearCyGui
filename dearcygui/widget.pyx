@@ -4154,6 +4154,7 @@ cdef class Tab(uiItem):
         self.state.cap.has_rect_size = True
         self._closable = False
         self._flags = imgui.ImGuiTabItemFlags_None
+        self._force_selected_counter = 0
 
     @property
     def closable(self):
@@ -4269,12 +4270,21 @@ cdef class Tab(uiItem):
 
     cdef bint draw_item(self) noexcept nogil:
         cdef imgui.ImGuiTabItemFlags flags = self._flags
+
+        # Check if value was just changed programmatically
         if (<SharedBool>self._value)._last_frame_change == self.context.viewport.frame_count:
             # The value was changed after the last time we drew
-            # TODO: will have no effect if we switch from show to no show.
-            # maybe have a counter here.
+            if SharedBool.get(<SharedBool>self._value):
+                # Start the force counter to ensure the change takes effect
+                # even if mouse is hovering over other widgets
+                self._force_selected_counter = 3
+
+        # If counter is active, force SetSelected flag
+        if self._force_selected_counter > 0:
             if SharedBool.get(<SharedBool>self._value):
                 flags |= imgui.ImGuiTabItemFlags_SetSelected
+            self._force_selected_counter -= 1
+
         cdef bint menu_open = imgui.BeginTabItem(self._imgui_label.c_str(),
                                                  &self._show if self._closable else NULL,
                                                  flags)
@@ -4291,7 +4301,7 @@ cdef class Tab(uiItem):
                 swap_Vec2(pos_p, self.context.viewport.parent_pos)
                 parent_size_backup = self.context.viewport.parent_size
                 # TODO: is there a frame border on the right to subtract ?
-                
+
                 self.context.viewport.parent_size.x = parent_size_backup.x - dx
                 self.context.viewport.parent_size.y = parent_size_backup.y - dy
                 draw_ui_children(self)
@@ -4301,7 +4311,12 @@ cdef class Tab(uiItem):
         else:
             self._propagate_hidden_state_to_children_with_handlers()
         self.state.cur.open = menu_open
-        SharedBool.set(<SharedBool>self._value, menu_open)
+
+        # Only overwrite the value if we're not forcing a selection
+        # This prevents ImGui from overwriting programmatic changes
+        if self._force_selected_counter == 0:
+            SharedBool.set(<SharedBool>self._value, menu_open)
+
         return self.state.cur.active and not(self.state.prev.active)
 
 

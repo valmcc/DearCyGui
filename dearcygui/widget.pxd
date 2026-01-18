@@ -162,6 +162,7 @@ cdef class TabButton(uiItem):
 cdef class Tab(uiItem):
     cdef bint _closable
     cdef int32_t _flags # imgui.ImGuiTabItemFlags
+    cdef int32_t _force_selected_counter # Counter for forcing SetSelected flag
 
 cdef class TabBar(uiItem):
     cdef int32_t _flags # imgui.ImGuiTabBarFlags
