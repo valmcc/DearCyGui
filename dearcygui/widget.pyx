@@ -4154,7 +4154,7 @@ cdef class Tab(uiItem):
         self.state.cap.has_rect_size = True
         self._closable = False
         self._flags = imgui.ImGuiTabItemFlags_None
-        self._force_selected_counter = 0
+        self._last_frame_sync = -1
 
     @property
     def closable(self):
@@ -4271,19 +4271,11 @@ cdef class Tab(uiItem):
     cdef bint draw_item(self) noexcept nogil:
         cdef imgui.ImGuiTabItemFlags flags = self._flags
 
-        # Check if value was just changed programmatically
-        if (<SharedBool>self._value)._last_frame_change == self.context.viewport.frame_count:
-            # The value was changed after the last time we drew
-            if SharedBool.get(<SharedBool>self._value):
-                # Start the force counter to ensure the change takes effect
-                # even if mouse is hovering over other widgets
-                self._force_selected_counter = 3
-
-        # If counter is active, force SetSelected flag
-        if self._force_selected_counter > 0:
+        # Check if value changed since we last synced (following InputText pattern)
+        # This allows SetSelected to persist across multiple frames until sync succeeds
+        if (<SharedBool>self._value)._last_frame_change > self._last_frame_sync:
             if SharedBool.get(<SharedBool>self._value):
                 flags |= imgui.ImGuiTabItemFlags_SetSelected
-            self._force_selected_counter -= 1
 
         cdef bint menu_open = imgui.BeginTabItem(self._imgui_label.c_str(),
                                                  &self._show if self._closable else NULL,
@@ -4312,10 +4304,9 @@ cdef class Tab(uiItem):
             self._propagate_hidden_state_to_children_with_handlers()
         self.state.cur.open = menu_open
 
-        # Only overwrite the value if we're not forcing a selection
-        # This prevents ImGui from overwriting programmatic changes
-        if self._force_selected_counter == 0:
-            SharedBool.set(<SharedBool>self._value, menu_open)
+        # Update value from ImGui and mark as synced
+        SharedBool.set(<SharedBool>self._value, menu_open)
+        self._last_frame_sync = (<SharedBool>self._value)._last_frame_update
 
         return self.state.cur.active and not(self.state.prev.active)
 
