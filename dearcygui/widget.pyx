@@ -4271,9 +4271,9 @@ cdef class Tab(uiItem):
     cdef bint draw_item(self) noexcept nogil:
         cdef imgui.ImGuiTabItemFlags flags = self._flags
 
-        # Check if value changed since we last synced (following InputText pattern)
+        # Check if value changed since we last synced (following SimplePlot pattern)
         # This allows SetSelected to persist across multiple frames until sync succeeds
-        if (<SharedBool>self._value)._last_frame_change > self._last_frame_sync:
+        if (<SharedBool>self._value)._last_frame_change != self._last_frame_sync:
             if SharedBool.get(<SharedBool>self._value):
                 flags |= imgui.ImGuiTabItemFlags_SetSelected
 
@@ -4306,7 +4306,7 @@ cdef class Tab(uiItem):
 
         # Update value from ImGui and mark as synced
         SharedBool.set(<SharedBool>self._value, menu_open)
-        self._last_frame_sync = (<SharedBool>self._value)._last_frame_update
+        self._last_frame_sync = (<SharedBool>self._value)._last_frame_change
 
         return self.state.cur.active and not(self.state.prev.active)
 
