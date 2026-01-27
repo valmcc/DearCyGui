@@ -162,6 +162,7 @@ cdef class TabButton(uiItem):
 cdef class Tab(uiItem):
     cdef bint _closable
     cdef int32_t _flags # imgui.ImGuiTabItemFlags
+    cdef int64_t _last_frame_update
 
 cdef class TabBar(uiItem):
     cdef int32_t _flags # imgui.ImGuiTabBarFlags

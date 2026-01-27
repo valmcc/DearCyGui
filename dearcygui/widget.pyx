@@ -4154,6 +4154,7 @@ cdef class Tab(uiItem):
         self.state.cap.has_rect_size = True
         self._closable = False
         self._flags = imgui.ImGuiTabItemFlags_None
+        self._last_frame_update = -1
 
     @property
     def closable(self):
@@ -4269,10 +4270,8 @@ cdef class Tab(uiItem):
 
     cdef bint draw_item(self) noexcept nogil:
         cdef imgui.ImGuiTabItemFlags flags = self._flags
-        if (<SharedBool>self._value)._last_frame_change == self.context.viewport.frame_count:
-            # The value was changed after the last time we drew
-            # TODO: will have no effect if we switch from show to no show.
-            # maybe have a counter here.
+        if (<SharedBool>self._value)._last_frame_change != self._last_frame_update:
+            # The value was changed, and not by this item.
             if SharedBool.get(<SharedBool>self._value):
                 flags |= imgui.ImGuiTabItemFlags_SetSelected
         cdef bint menu_open = imgui.BeginTabItem(self._imgui_label.c_str(),
@@ -4302,6 +4301,7 @@ cdef class Tab(uiItem):
             self._propagate_hidden_state_to_children_with_handlers()
         self.state.cur.open = menu_open
         SharedBool.set(<SharedBool>self._value, menu_open)
+        self._last_frame_update = (<SharedBool>self._value)._last_frame_change
         return self.state.cur.active and not(self.state.prev.active)
 
 
