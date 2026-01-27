@@ -4763,11 +4763,26 @@ cdef class TreeNode(uiItem):
         if was_open and self._selectable:
             flags |= imgui.ImGuiTreeNodeFlags_Selected
 
+        # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
+        # PressedOnClickRelease (mouse UP) for label-area clicks. This
+        # causes click handlers and toggle to fire on different frames
+        # for label clicks. To fix this, when the user hasn't specified
+        # OpenOnArrow or OpenOnDoubleClick, we force OpenOnArrow so
+        # ImGui only toggles on arrow clicks (mouse DOWN), and we
+        # handle label-area toggles manually on mouse DOWN below.
+        cdef bint manual_label_toggle = \
+            (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
+                      imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
+                      imgui.ImGuiTreeNodeFlags_Leaf)) == 0
+        if manual_label_toggle:
+            flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
+
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
         self.state.cur.open = was_open
         cdef bint open_and_visible = imgui.TreeNodeEx(self._imgui_label.c_str(),
                                                       flags)
         self.update_current_state()
+        # Detect toggle from ImGui (arrow clicks, which fire on mouse DOWN)
         if self.state.cur.rendered and open_and_visible and not(was_open):
             SharedBool.set(<SharedBool>self._value, True)
             self.state.cur.open = True
@@ -4775,6 +4790,15 @@ cdef class TreeNode(uiItem):
             SharedBool.set(<SharedBool>self._value, False)
             self.state.cur.open = False
             self._propagate_hidden_state_to_children_with_handlers()
+        # Manually toggle on label-area left click (mouse DOWN) so that
+        # click handlers and toggle are always in sync.
+        # open_and_visible == was_open means ImGui did not toggle (label click).
+        if manual_label_toggle and self._enabled and \
+           self.state.cur.clicked[0] and open_and_visible == was_open:
+            SharedBool.set(<SharedBool>self._value, not(was_open))
+            self.state.cur.open = not(was_open)
+            if was_open:
+                self._propagate_hidden_state_to_children_with_handlers()
         cdef Vec2 pos_p, parent_size_backup
         cdef float dx, dy
         if open_and_visible:
@@ -4949,6 +4973,20 @@ cdef class CollapsingHeader(uiItem):
         if self._closable:
             flags |= imgui.ImGuiTreeNodeFlags_Selected
 
+        # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
+        # PressedOnClickRelease (mouse UP) for label-area clicks. This
+        # causes click handlers and toggle to fire on different frames
+        # for label clicks. To fix this, when the user hasn't specified
+        # OpenOnArrow or OpenOnDoubleClick, we force OpenOnArrow so
+        # ImGui only toggles on arrow clicks (mouse DOWN), and we
+        # handle label-area toggles manually on mouse DOWN below.
+        cdef bint manual_label_toggle = \
+            (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
+                      imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
+                      imgui.ImGuiTreeNodeFlags_Leaf)) == 0
+        if manual_label_toggle:
+            flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
+
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
         self.state.cur.open = was_open
         cdef bint open_and_visible = \
@@ -4958,6 +4996,7 @@ cdef class CollapsingHeader(uiItem):
         if not(self._show):
             self._show_update_requested = True
         self.update_current_state()
+        # Detect toggle from ImGui (arrow clicks, which fire on mouse DOWN)
         if self.state.cur.rendered and open_and_visible and not(was_open):
             SharedBool.set(<SharedBool>self._value, True)
             self.state.cur.open = True
@@ -4965,6 +5004,15 @@ cdef class CollapsingHeader(uiItem):
             SharedBool.set(<SharedBool>self._value, False)
             self.state.cur.open = False
             self._propagate_hidden_state_to_children_with_handlers()
+        # Manually toggle on label-area left click (mouse DOWN) so that
+        # click handlers and toggle are always in sync.
+        # open_and_visible == was_open means ImGui did not toggle (label click).
+        if manual_label_toggle and self._enabled and \
+           self.state.cur.clicked[0] and open_and_visible == was_open:
+            SharedBool.set(<SharedBool>self._value, not(was_open))
+            self.state.cur.open = not(was_open)
+            if was_open:
+                self._propagate_hidden_state_to_children_with_handlers()
         cdef Vec2 pos_p, parent_size_backup
         cdef float dx, dy
         if open_and_visible:
