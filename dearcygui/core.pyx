@@ -4403,6 +4403,9 @@ cdef class Viewport(baseItem):
         # Initialize drawing state
         imgui.SetMouseCursor(self._cursor)
         self._cursor = imgui.ImGuiMouseCursor_Arrow
+        # Disable Ctrl+Tab window picker
+        imgui.Shortcut(imgui.ImGuiMod_Ctrl | imgui.ImGuiKey_Tab, imgui.ImGuiInputFlags_RouteGlobal) # added
+        imgui.Shortcut(imgui.ImGuiMod_Ctrl | imgui.ImGuiMod_Shift | imgui.ImGuiKey_Tab, imgui.ImGuiInputFlags_RouteGlobal) # added
         self.set_previous_states()
         if self._font is not None:
             self._font.push()
