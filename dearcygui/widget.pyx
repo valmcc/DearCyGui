@@ -4777,48 +4777,22 @@ cdef class TreeNode(uiItem):
         if was_open and self._selectable:
             flags |= imgui.ImGuiTreeNodeFlags_Selected
 
-        # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
-        # PressedOnClickRelease (mouse UP) for label-area clicks. To
-        # make both areas behave consistently (toggle on mouse UP),
-        # we force OpenOnArrow so ImGui only toggles on arrow clicks.
-        # We then ignore ImGui's arrow-DOWN toggle (SetNextItemOpen
-        # undoes it next frame) and instead handle all toggles
-        # manually on mouse release.
-        cdef bint manual_release_toggle = \
-            (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
-                      imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
-                      imgui.ImGuiTreeNodeFlags_Leaf)) == 0
-        if manual_release_toggle:
-            flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
-
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
         self.state.cur.open = was_open
         cdef bint open_and_visible = imgui.TreeNodeEx(self._imgui_label.c_str(),
                                                       flags)
         self.update_current_state()
-        if manual_release_toggle:
-            # Toggle on mouse release while hovered (bar-like behavior).
-            # Any arrow-DOWN toggle by ImGui is ignored; SetNextItemOpen
-            # will undo it on the next frame.
-            if self._enabled and self.state.cur.hovered and \
-               imgui.IsMouseReleased(0):
-                SharedBool.set(<SharedBool>self._value, not(was_open))
-                self.state.cur.open = not(was_open)
-                if was_open:
-                    self._propagate_hidden_state_to_children_with_handlers()
-        else:
-            # User specified custom open behavior; use ImGui's toggle
-            if self.state.cur.rendered and open_and_visible and not(was_open):
-                SharedBool.set(<SharedBool>self._value, True)
-                self.state.cur.open = True
-            elif self.state.cur.rendered and was_open and not(open_and_visible):
-                SharedBool.set(<SharedBool>self._value, False)
-                self.state.cur.open = False
-                self._propagate_hidden_state_to_children_with_handlers()
+        if self.state.cur.rendered and open_and_visible and not(was_open):
+            SharedBool.set(<SharedBool>self._value, True)
+            self.state.cur.open = True
+        elif self.state.cur.rendered and was_open and not(open_and_visible):
+            SharedBool.set(<SharedBool>self._value, False)
+            self.state.cur.open = False
+            self._propagate_hidden_state_to_children_with_handlers()
         cdef Vec2 pos_p, parent_size_backup
         cdef float dx, dy
         if open_and_visible:
-            if self.state.cur.open and self.last_widgets_child is not None:
+            if self.last_widgets_child is not None:
                 pos_p = ImVec2Vec2(imgui.GetCursorScreenPos())
                 dx = pos_p.x - self.context.viewport.parent_pos.x
                 dy = pos_p.y - self.context.viewport.parent_pos.y
@@ -4989,20 +4963,6 @@ cdef class CollapsingHeader(uiItem):
         if self._closable:
             flags |= imgui.ImGuiTreeNodeFlags_Selected
 
-        # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
-        # PressedOnClickRelease (mouse UP) for label-area clicks. To
-        # make both areas behave consistently (toggle on mouse UP),
-        # we force OpenOnArrow so ImGui only toggles on arrow clicks.
-        # We then ignore ImGui's arrow-DOWN toggle (SetNextItemOpen
-        # undoes it next frame) and instead handle all toggles
-        # manually on mouse release.
-        cdef bint manual_release_toggle = \
-            (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
-                      imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
-                      imgui.ImGuiTreeNodeFlags_Leaf)) == 0
-        if manual_release_toggle:
-            flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
-
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
         self.state.cur.open = was_open
         cdef bint open_and_visible = \
@@ -5012,29 +4972,17 @@ cdef class CollapsingHeader(uiItem):
         if not(self._show):
             self._show_update_requested = True
         self.update_current_state()
-        if manual_release_toggle:
-            # Toggle on mouse release while hovered (bar-like behavior).
-            # Any arrow-DOWN toggle by ImGui is ignored; SetNextItemOpen
-            # will undo it on the next frame.
-            if self._enabled and self.state.cur.hovered and \
-               imgui.IsMouseReleased(0):
-                SharedBool.set(<SharedBool>self._value, not(was_open))
-                self.state.cur.open = not(was_open)
-                if was_open:
-                    self._propagate_hidden_state_to_children_with_handlers()
-        else:
-            # User specified custom open behavior; use ImGui's toggle
-            if self.state.cur.rendered and open_and_visible and not(was_open):
-                SharedBool.set(<SharedBool>self._value, True)
-                self.state.cur.open = True
-            elif self.state.cur.rendered and was_open and not(open_and_visible):
-                SharedBool.set(<SharedBool>self._value, False)
-                self.state.cur.open = False
-                self._propagate_hidden_state_to_children_with_handlers()
+        if self.state.cur.rendered and open_and_visible and not(was_open):
+            SharedBool.set(<SharedBool>self._value, True)
+            self.state.cur.open = True
+        elif self.state.cur.rendered and was_open and not(open_and_visible):
+            SharedBool.set(<SharedBool>self._value, False)
+            self.state.cur.open = False
+            self._propagate_hidden_state_to_children_with_handlers()
         cdef Vec2 pos_p, parent_size_backup
         cdef float dx, dy
         if open_and_visible:
-            if self.state.cur.open and self.last_widgets_child is not None:
+            if self.last_widgets_child is not None:
                 pos_p = ImVec2Vec2(imgui.GetCursorScreenPos())
                 dx = pos_p.x - self.context.viewport.parent_pos.x
                 dy = pos_p.y - self.context.viewport.parent_pos.y
