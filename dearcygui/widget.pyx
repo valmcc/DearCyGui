@@ -4780,16 +4780,15 @@ cdef class TreeNode(uiItem):
         # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
         # PressedOnClickRelease (mouse UP) for label-area clicks. To
         # make both areas behave consistently (toggle on mouse UP),
-        # we force OpenOnArrow so ImGui only toggles on arrow clicks.
-        # We then ignore ImGui's arrow-DOWN toggle (SetNextItemOpen
-        # undoes it next frame) and instead handle all toggles
+        # we force OpenOnDoubleClick so that ImGui never toggles on
+        # any single click (arrow or label). We handle all toggles
         # manually on mouse release.
         cdef bint manual_release_toggle = \
             (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
                       imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
                       imgui.ImGuiTreeNodeFlags_Leaf)) == 0
         if manual_release_toggle:
-            flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
+            flags |= imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick
 
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
         self.state.cur.open = was_open
@@ -4798,8 +4797,8 @@ cdef class TreeNode(uiItem):
         self.update_current_state()
         if manual_release_toggle:
             # Toggle on mouse release while hovered (bar-like behavior).
-            # Any arrow-DOWN toggle by ImGui is ignored; SetNextItemOpen
-            # will undo it on the next frame.
+            # OpenOnDoubleClick prevents ImGui from toggling on any
+            # single click, so the arrow won't flash.
             if self._enabled and self.state.cur.hovered and \
                imgui.IsMouseReleased(0):
                 SharedBool.set(<SharedBool>self._value, not(was_open))
@@ -4992,16 +4991,15 @@ cdef class CollapsingHeader(uiItem):
         # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
         # PressedOnClickRelease (mouse UP) for label-area clicks. To
         # make both areas behave consistently (toggle on mouse UP),
-        # we force OpenOnArrow so ImGui only toggles on arrow clicks.
-        # We then ignore ImGui's arrow-DOWN toggle (SetNextItemOpen
-        # undoes it next frame) and instead handle all toggles
+        # we force OpenOnDoubleClick so that ImGui never toggles on
+        # any single click (arrow or label). We handle all toggles
         # manually on mouse release.
         cdef bint manual_release_toggle = \
             (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
                       imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
                       imgui.ImGuiTreeNodeFlags_Leaf)) == 0
         if manual_release_toggle:
-            flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
+            flags |= imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick
 
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
         self.state.cur.open = was_open
@@ -5014,8 +5012,8 @@ cdef class CollapsingHeader(uiItem):
         self.update_current_state()
         if manual_release_toggle:
             # Toggle on mouse release while hovered (bar-like behavior).
-            # Any arrow-DOWN toggle by ImGui is ignored; SetNextItemOpen
-            # will undo it on the next frame.
+            # OpenOnDoubleClick prevents ImGui from toggling on any
+            # single click, so the arrow won't flash.
             if self._enabled and self.state.cur.hovered and \
                imgui.IsMouseReleased(0):
                 SharedBool.set(<SharedBool>self._value, not(was_open))
