@@ -1905,7 +1905,7 @@ cdef class InputText(uiItem):
         self.state.cap.can_be_hovered = True
         self._multiline = False
         self._max_characters = 1024
-        self._last_frame_update = -1
+        self._last_frame_change = -1
         self._flags = imgui.ImGuiInputTextFlags_None
         self._buffer = <char*>malloc(self._max_characters + 1)
         if self._buffer == NULL:
@@ -4168,7 +4168,7 @@ cdef class Tab(uiItem):
         self.state.cap.has_rect_size = True
         self._closable = False
         self._flags = imgui.ImGuiTabItemFlags_None
-        self._last_frame_update = -1
+        self._last_frame_change = -1
 
     @property
     def closable(self):
