@@ -1083,7 +1083,7 @@ cdef class Combo(uiItem):
     @items.setter
     def items(self, value):
         cdef unique_lock[DCGMutex] m
-        cdef unique_lock[DCGMutex] value_m
+        # cdef unique_lock[DCGMutex] value_m
         lock_gil_friendly(m, self.mutex)
         self._items.clear()
         if value is None:
@@ -1095,12 +1095,16 @@ cdef class Combo(uiItem):
                 self._items.push_back(string_from_str(v))
         else:
             raise ValueError(f"Invalid type {type(value)} passed as items. Expected array of strings")
-        lock_gil_friendly(value_m, self._value.mutex)
-        if self._value._num_attached == 1 and \
-           self._value._last_frame_update == -1 and \
-           self._items.size() > 0: # TODO: this doesn't seem reliable enough
-            # initialize the value with the first element
-            SharedStr.set(<SharedStr>self._value, self._items[0])
+        ### Note: original intent was to initialize the value with the first element
+        ### Unless given. Unfortunately a bug in the implementation below meant
+        ### this never happened. Re-adding it would be a breaking change for 0.1.x.
+        ### TODO: consider re-adding fixed in 0.2.0
+        #lock_gil_friendly(value_m, self._value.mutex)
+        #if self._value._num_attached == 1 and \
+        #   self._value._last_frame_update == -1 and \
+        #   self._items.size() > 0:
+        #    # initialize the value with the first element
+        #    SharedStr.set(<SharedStr>self._value, self._items[0])
 
     @property
     def height_mode(self):
@@ -1662,7 +1666,7 @@ cdef class ListBox(uiItem):
     @items.setter
     def items(self, value):
         cdef unique_lock[DCGMutex] m
-        cdef unique_lock[DCGMutex] value_m
+        # cdef unique_lock[DCGMutex] value_m
         lock_gil_friendly(m, self.mutex)
         self._items.clear()
         if value is None:
@@ -1674,12 +1678,16 @@ cdef class ListBox(uiItem):
                 self._items.push_back(string_from_str(v))
         else:
             raise ValueError(f"Invalid type {type(value)} passed as items. Expected array of strings")
-        lock_gil_friendly(value_m, self._value.mutex)
-        if self._value._num_attached == 1 and \
-           self._value._last_frame_update == -1 and \
-           self._items.size() > 0:
-            # initialize the value with the first element
-            SharedStr.set(<SharedStr>self._value, self._items[0])
+        ### Note: original intent was to initialize the value with the first element
+        ### Unless given. Unfortunately a bug in the implementation below meant
+        ### this never happened. Re-adding it would be a breaking change for 0.1.x.
+        ### TODO: consider re-adding fixed in 0.2.0
+        #lock_gil_friendly(value_m, self._value.mutex)
+        #if self._value._num_attached == 1 and \
+        #   self._value._last_frame_update == -1 and \
+        #   self._items.size() > 0:
+        #    # initialize the value with the first element
+        #    SharedStr.set(<SharedStr>self._value, self._items[0])
 
     @property
     def num_items_shown_when_open(self):
@@ -1792,7 +1800,7 @@ cdef class RadioButton(uiItem):
     @items.setter
     def items(self, value):
         cdef unique_lock[DCGMutex] m
-        cdef unique_lock[DCGMutex] value_m
+        # cdef unique_lock[DCGMutex] value_m
         lock_gil_friendly(m, self.mutex)
         self._items.clear()
         if value is None:
@@ -1804,12 +1812,16 @@ cdef class RadioButton(uiItem):
                 self._items.push_back(string_from_str(v))
         else:
             raise ValueError(f"Invalid type {type(value)} passed as items. Expected array of strings")
-        lock_gil_friendly(value_m, self._value.mutex)
-        if self._value._num_attached == 1 and \
-           self._value._last_frame_update == -1 and \
-           self._items.size() > 0:
-            # initialize the value with the first element
-            SharedStr.set(<SharedStr>self._value, self._items[0])
+        ### Note: original intent was to initialize the value with the first element
+        ### Unless given. Unfortunately a bug in the implementation below meant
+        ### this never happened. Re-adding it would be a breaking change for 0.1.x.
+        ### TODO: consider re-adding fixed in 0.2.0
+        #lock_gil_friendly(value_m, self._value.mutex)
+        #if self._value._num_attached == 1 and \
+        #   self._value._last_frame_update == -1 and \
+        #   self._items.size() > 0: # The issue is that _last_frame_update is never -1 as it is initialized to the frame count
+        #    # initialize the value with the first element
+        #    SharedStr.set(<SharedStr>self._value, self._items[0])
 
     @property
     def horizontal(self):
@@ -1893,6 +1905,7 @@ cdef class InputText(uiItem):
         self.state.cap.can_be_hovered = True
         self._multiline = False
         self._max_characters = 1024
+        self._last_frame_change = -1
         self._flags = imgui.ImGuiInputTextFlags_None
         self._buffer = <char*>malloc(self._max_characters + 1)
         if self._buffer == NULL:
@@ -2322,14 +2335,14 @@ cdef class InputText(uiItem):
         
         # Get current value from source if needed
         SharedStr.get(<SharedStr>self._value, current_value)
-        cdef bint need_update = (<SharedStr>self._value)._last_frame_change >= self._last_frame_update 
+        cdef bint need_update = (<SharedStr>self._value)._last_frame_change != self._last_frame_change
 
         if need_update:
             size = min(<int>current_value.size(), self._max_characters)
             # Copy value to buffer
             memcpy(self._buffer, current_value.data(), size)
             self._buffer[size] = 0
-            self._last_frame_update = (<SharedStr>self._value)._last_frame_update
+            self._last_frame_change = (<SharedStr>self._value)._last_frame_change
 
         cdef bint changed = False
         if not(self._enabled):
@@ -2364,6 +2377,7 @@ cdef class InputText(uiItem):
         if changed:
             current_value = DCGString(<char*>self._buffer)
             SharedStr.set(<SharedStr>self._value, current_value)
+            self._last_frame_change = (<SharedStr>self._value)._last_frame_change
 
         if not(self._enabled):
             changed = False
@@ -4154,6 +4168,7 @@ cdef class Tab(uiItem):
         self.state.cap.has_rect_size = True
         self._closable = False
         self._flags = imgui.ImGuiTabItemFlags_None
+        self._last_frame_change = -1
 
     @property
     def closable(self):
@@ -4269,10 +4284,8 @@ cdef class Tab(uiItem):
 
     cdef bint draw_item(self) noexcept nogil:
         cdef imgui.ImGuiTabItemFlags flags = self._flags
-        if (<SharedBool>self._value)._last_frame_change == self.context.viewport.frame_count:
-            # The value was changed after the last time we drew
-            # TODO: will have no effect if we switch from show to no show.
-            # maybe have a counter here.
+        if (<SharedBool>self._value)._last_frame_change != self._last_frame_change:
+            # The value was changed, and not by this item.
             if SharedBool.get(<SharedBool>self._value):
                 flags |= imgui.ImGuiTabItemFlags_SetSelected
         cdef bint menu_open = imgui.BeginTabItem(self._imgui_label.c_str(),
@@ -4302,6 +4315,7 @@ cdef class Tab(uiItem):
             self._propagate_hidden_state_to_children_with_handlers()
         self.state.cur.open = menu_open
         SharedBool.set(<SharedBool>self._value, menu_open)
+        self._last_frame_change = (<SharedBool>self._value)._last_frame_change
         return self.state.cur.active and not(self.state.prev.active)
 
 
@@ -4782,7 +4796,6 @@ cdef class TreeNode(uiItem):
         cdef bint open_and_visible = imgui.TreeNodeEx(self._imgui_label.c_str(),
                                                       flags)
         self.update_current_state()
-        # Detect toggle from ImGui (arrow clicks, which fire on mouse DOWN)
         if self.state.cur.rendered and open_and_visible and not(was_open):
             SharedBool.set(<SharedBool>self._value, True)
             self.state.cur.open = True
@@ -4996,7 +5009,6 @@ cdef class CollapsingHeader(uiItem):
         if not(self._show):
             self._show_update_requested = True
         self.update_current_state()
-        # Detect toggle from ImGui (arrow clicks, which fire on mouse DOWN)
         if self.state.cur.rendered and open_and_visible and not(was_open):
             SharedBool.set(<SharedBool>self._value, True)
             self.state.cur.open = True
