@@ -4778,17 +4778,17 @@ cdef class TreeNode(uiItem):
             flags |= imgui.ImGuiTreeNodeFlags_Selected
 
         # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
-        # PressedOnClickRelease (mouse UP) for label-area clicks. This
-        # causes click handlers and toggle to fire on different frames
-        # for label clicks. To fix this, when the user hasn't specified
-        # OpenOnArrow or OpenOnDoubleClick, we force OpenOnArrow so
-        # ImGui only toggles on arrow clicks (mouse DOWN), and we
-        # handle label-area toggles manually on mouse DOWN below.
-        cdef bint manual_label_toggle = \
+        # PressedOnClickRelease (mouse UP) for label-area clicks. To
+        # make both areas behave consistently (toggle on mouse UP),
+        # we force OpenOnArrow so ImGui only toggles on arrow clicks.
+        # We then ignore ImGui's arrow-DOWN toggle (SetNextItemOpen
+        # undoes it next frame) and instead handle all toggles
+        # manually on mouse release.
+        cdef bint manual_release_toggle = \
             (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
                       imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
                       imgui.ImGuiTreeNodeFlags_Leaf)) == 0
-        if manual_label_toggle:
+        if manual_release_toggle:
             flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
 
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
@@ -4796,26 +4796,29 @@ cdef class TreeNode(uiItem):
         cdef bint open_and_visible = imgui.TreeNodeEx(self._imgui_label.c_str(),
                                                       flags)
         self.update_current_state()
-        if self.state.cur.rendered and open_and_visible and not(was_open):
-            SharedBool.set(<SharedBool>self._value, True)
-            self.state.cur.open = True
-        elif self.state.cur.rendered and was_open and not(open_and_visible):
-            SharedBool.set(<SharedBool>self._value, False)
-            self.state.cur.open = False
-            self._propagate_hidden_state_to_children_with_handlers()
-        # Manually toggle on label-area left click (mouse DOWN) so that
-        # click handlers and toggle are always in sync.
-        # open_and_visible == was_open means ImGui did not toggle (label click).
-        if manual_label_toggle and self._enabled and \
-           self.state.cur.clicked[0] and open_and_visible == was_open:
-            SharedBool.set(<SharedBool>self._value, not(was_open))
-            self.state.cur.open = not(was_open)
-            if was_open:
+        if manual_release_toggle:
+            # Toggle on mouse release while hovered (bar-like behavior).
+            # Any arrow-DOWN toggle by ImGui is ignored; SetNextItemOpen
+            # will undo it on the next frame.
+            if self._enabled and self.state.cur.hovered and \
+               imgui.IsMouseReleased(0):
+                SharedBool.set(<SharedBool>self._value, not(was_open))
+                self.state.cur.open = not(was_open)
+                if was_open:
+                    self._propagate_hidden_state_to_children_with_handlers()
+        else:
+            # User specified custom open behavior; use ImGui's toggle
+            if self.state.cur.rendered and open_and_visible and not(was_open):
+                SharedBool.set(<SharedBool>self._value, True)
+                self.state.cur.open = True
+            elif self.state.cur.rendered and was_open and not(open_and_visible):
+                SharedBool.set(<SharedBool>self._value, False)
+                self.state.cur.open = False
                 self._propagate_hidden_state_to_children_with_handlers()
         cdef Vec2 pos_p, parent_size_backup
         cdef float dx, dy
         if open_and_visible:
-            if self.last_widgets_child is not None:
+            if self.state.cur.open and self.last_widgets_child is not None:
                 pos_p = ImVec2Vec2(imgui.GetCursorScreenPos())
                 dx = pos_p.x - self.context.viewport.parent_pos.x
                 dy = pos_p.y - self.context.viewport.parent_pos.y
@@ -4987,17 +4990,17 @@ cdef class CollapsingHeader(uiItem):
             flags |= imgui.ImGuiTreeNodeFlags_Selected
 
         # ImGui uses PressedOnClick (mouse DOWN) for arrow clicks but
-        # PressedOnClickRelease (mouse UP) for label-area clicks. This
-        # causes click handlers and toggle to fire on different frames
-        # for label clicks. To fix this, when the user hasn't specified
-        # OpenOnArrow or OpenOnDoubleClick, we force OpenOnArrow so
-        # ImGui only toggles on arrow clicks (mouse DOWN), and we
-        # handle label-area toggles manually on mouse DOWN below.
-        cdef bint manual_label_toggle = \
+        # PressedOnClickRelease (mouse UP) for label-area clicks. To
+        # make both areas behave consistently (toggle on mouse UP),
+        # we force OpenOnArrow so ImGui only toggles on arrow clicks.
+        # We then ignore ImGui's arrow-DOWN toggle (SetNextItemOpen
+        # undoes it next frame) and instead handle all toggles
+        # manually on mouse release.
+        cdef bint manual_release_toggle = \
             (flags & (imgui.ImGuiTreeNodeFlags_OpenOnArrow | \
                       imgui.ImGuiTreeNodeFlags_OpenOnDoubleClick | \
                       imgui.ImGuiTreeNodeFlags_Leaf)) == 0
-        if manual_label_toggle:
+        if manual_release_toggle:
             flags |= imgui.ImGuiTreeNodeFlags_OpenOnArrow
 
         imgui.SetNextItemOpen(was_open, imgui.ImGuiCond_Always)
@@ -5009,26 +5012,29 @@ cdef class CollapsingHeader(uiItem):
         if not(self._show):
             self._show_update_requested = True
         self.update_current_state()
-        if self.state.cur.rendered and open_and_visible and not(was_open):
-            SharedBool.set(<SharedBool>self._value, True)
-            self.state.cur.open = True
-        elif self.state.cur.rendered and was_open and not(open_and_visible):
-            SharedBool.set(<SharedBool>self._value, False)
-            self.state.cur.open = False
-            self._propagate_hidden_state_to_children_with_handlers()
-        # Manually toggle on label-area left click (mouse DOWN) so that
-        # click handlers and toggle are always in sync.
-        # open_and_visible == was_open means ImGui did not toggle (label click).
-        if manual_label_toggle and self._enabled and \
-           self.state.cur.clicked[0] and open_and_visible == was_open:
-            SharedBool.set(<SharedBool>self._value, not(was_open))
-            self.state.cur.open = not(was_open)
-            if was_open:
+        if manual_release_toggle:
+            # Toggle on mouse release while hovered (bar-like behavior).
+            # Any arrow-DOWN toggle by ImGui is ignored; SetNextItemOpen
+            # will undo it on the next frame.
+            if self._enabled and self.state.cur.hovered and \
+               imgui.IsMouseReleased(0):
+                SharedBool.set(<SharedBool>self._value, not(was_open))
+                self.state.cur.open = not(was_open)
+                if was_open:
+                    self._propagate_hidden_state_to_children_with_handlers()
+        else:
+            # User specified custom open behavior; use ImGui's toggle
+            if self.state.cur.rendered and open_and_visible and not(was_open):
+                SharedBool.set(<SharedBool>self._value, True)
+                self.state.cur.open = True
+            elif self.state.cur.rendered and was_open and not(open_and_visible):
+                SharedBool.set(<SharedBool>self._value, False)
+                self.state.cur.open = False
                 self._propagate_hidden_state_to_children_with_handlers()
         cdef Vec2 pos_p, parent_size_backup
         cdef float dx, dy
         if open_and_visible:
-            if self.last_widgets_child is not None:
+            if self.state.cur.open and self.last_widgets_child is not None:
                 pos_p = ImVec2Vec2(imgui.GetCursorScreenPos())
                 dx = pos_p.x - self.context.viewport.parent_pos.x
                 dy = pos_p.y - self.context.viewport.parent_pos.y
