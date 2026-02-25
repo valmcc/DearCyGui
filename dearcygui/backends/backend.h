@@ -210,6 +210,7 @@ public:
     float clearColor[4] = { 0., 0., 0., 1. };
     bool hasModesChanged = false;
     bool hasVSync = true; // TODO: maybe change that
+    float renderScale = 1.0f; // Internal render resolution scale (1.0 = native, <1.0 = lower res + upscale)
     bool shouldSkipPresenting = false;
     std::atomic<bool> activityDetected{true};
     std::atomic<bool> needsRefresh{true};
@@ -342,6 +343,15 @@ private:
     bool has_buffer_storage = false;
     bool has_anisotropic_filter = false;
     float max_anisotropy = 1.0f;
+
+    // Render-scale FBO (used when renderScale < 1.0 to render at lower res then upscale)
+    GLuint renderScaleFbo = 0;
+    GLuint renderScaleFboTexture = 0;
+    int renderScaleFboWidth = 0;
+    int renderScaleFboHeight = 0;
+    int currentVSyncInterval = -1; // Cached vsync state to avoid per-frame driver query
+
+    void ensureRenderScaleFbo(int w, int h);
 
     // Fence management
     struct FenceSync {

@@ -53,28 +53,99 @@ bool platformViewport::fastActivityCheck() {
     return false;
 }
 
+void SDLViewport::ensureRenderScaleFbo(int w, int h) {
+    if (renderScaleFbo != 0 && renderScaleFboWidth == w && renderScaleFboHeight == h)
+        return;
+
+    // Delete stale FBO/texture
+    if (renderScaleFbo != 0) {
+        glDeleteFramebuffers(1, &renderScaleFbo);
+        renderScaleFbo = 0;
+    }
+    if (renderScaleFboTexture != 0) {
+        glDeleteTextures(1, &renderScaleFboTexture);
+        renderScaleFboTexture = 0;
+    }
+
+    // Create scaled color texture
+    glGenTextures(1, &renderScaleFboTexture);
+    glBindTexture(GL_TEXTURE_2D, renderScaleFboTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Attach to FBO
+    glGenFramebuffers(1, &renderScaleFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, renderScaleFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderScaleFboTexture, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    renderScaleFboWidth = w;
+    renderScaleFboHeight = h;
+}
+
 // Move prepare_present implementation into class method
 void SDLViewport::preparePresentFrame() {
+    // Apply render scale so ImGui finalises draw data with the correct
+    // framebuffer-to-display ratio.  Must be set before ImGui::Render().
+    ImGui::GetIO().DisplayFramebufferScale = ImVec2(renderScale, renderScale);
+
     // Rendering
     ImGui::Render();
     renderContextLock.lock();
     SDL_GL_MakeCurrent(windowHandle, glContext);
 
-    int current_interval, desired_interval;
-    SDL_GL_GetSwapInterval(&current_interval);
-    desired_interval = hasVSync ? 1 : 0;
-    if (desired_interval != current_interval)
+    // Only call SDL_GL_SetSwapInterval when the desired state actually changes,
+    // avoiding an unnecessary driver round-trip every frame.
+    int desired_interval = hasVSync ? 1 : 0;
+    if (desired_interval != currentVSyncInterval) {
         SDL_GL_SetSwapInterval(desired_interval);
-    glDrawBuffer(GL_BACK);
-    glViewport(0, 0, frameWidth, frameHeight);
-    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    {
-        // We hold the mutex during the call to prevent
-        // texture write before we set up the write syncs.
-        std::lock_guard<std::recursive_mutex> lock(textureMutex);
-        ImGui_ImplOpenGL3_RenderDrawData(this, ImGui::GetDrawData());
+        currentVSyncInterval = desired_interval;
     }
+
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+
+    if (renderScale < 0.999f) {
+        // Render to a smaller FBO then blit up to the backbuffer.
+        // This trades visual sharpness for a dramatic reduction in fillrate,
+        // which is the primary bottleneck on integrated GPUs at 4K.
+        int scaledW = (int)(frameWidth  * renderScale);
+        int scaledH = (int)(frameHeight * renderScale);
+        ensureRenderScaleFbo(scaledW, scaledH);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, renderScaleFbo);
+        glViewport(0, 0, scaledW, scaledH);
+        glClear(GL_COLOR_BUFFER_BIT);
+        {
+            // We hold the mutex during the call to prevent
+            // texture write before we set up the write syncs.
+            std::lock_guard<std::recursive_mutex> lock(textureMutex);
+            ImGui_ImplOpenGL3_RenderDrawData(this, ImGui::GetDrawData());
+        }
+
+        // Upscale to the native backbuffer with bilinear filtering
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, renderScaleFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, scaledW, scaledH,
+                          0, 0, frameWidth, frameHeight,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    } else {
+        // Render directly to the backbuffer at native resolution.
+        // Depth test is disabled by ImGui's render state, so we only need to
+        // clear the colour buffer — clearing depth wastes bandwidth for nothing.
+        glDrawBuffer(GL_BACK);
+        glViewport(0, 0, frameWidth, frameHeight);
+        glClear(GL_COLOR_BUFFER_BIT);
+        {
+            // We hold the mutex during the call to prevent
+            // texture write before we set up the write syncs.
+            std::lock_guard<std::recursive_mutex> lock(textureMutex);
+            ImGui_ImplOpenGL3_RenderDrawData(this, ImGui::GetDrawData());
+        }
+    }
+
     currentFrame++; // should it be mutex protected ?
     cleanupTextures();
     SDL_GL_MakeCurrent(windowHandle, NULL);
@@ -804,6 +875,15 @@ void SDLViewport::cleanup() {
     if (hasOpenGL3Init) {
         renderContextLock.lock();
         SDL_GL_MakeCurrent(windowHandle, glContext);
+        // Clean up the render-scale FBO and its texture
+        if (renderScaleFbo != 0) {
+            glDeleteFramebuffers(1, &renderScaleFbo);
+            renderScaleFbo = 0;
+        }
+        if (renderScaleFboTexture != 0) {
+            glDeleteTextures(1, &renderScaleFboTexture);
+            renderScaleFboTexture = 0;
+        }
         ImGui_ImplOpenGL3_Shutdown();
         SDL_GL_MakeCurrent(windowHandle, NULL);
         renderContextLock.unlock();

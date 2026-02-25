@@ -3664,6 +3664,45 @@ cdef class Viewport(baseItem):
         (<platformViewport*>self._platform).hasVSync = value
 
     @property
+    def render_scale(self) -> float:
+        """
+        Internal rendering resolution scale factor (default: 1.0).
+
+        When set below 1.0 the UI is rendered into a smaller off-screen
+        framebuffer and then bilinearly upscaled to the native display
+        resolution.  For example a value of 0.5 renders at half the width
+        and height (one quarter of the total pixels) and then stretches the
+        result to fill the window.
+
+        This is the most effective single setting for recovering frame rate
+        on integrated graphics at high display resolutions such as 4K,
+        where GPU fillrate — not CPU or draw-call overhead — is the
+        dominant bottleneck.  Representative trade-offs:
+
+        * 1.0  — native resolution, no quality loss (default)
+        * 0.75 — ~44 % fewer pixels, mild softening, good balance
+        * 0.5  — ~75 % fewer pixels, visibly softer, large fps gain
+
+        Must be in the range (0.0, 1.0].  Values above 1.0 are not
+        supported and will raise ValueError.  Setting to exactly 1.0
+        disables the intermediate FBO and renders directly to the
+        backbuffer with no overhead.
+        """
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        self.__check_alive()
+        return (<platformViewport*>self._platform).renderScale
+
+    @render_scale.setter
+    def render_scale(self, float value):
+        cdef unique_lock[DCGMutex] m
+        lock_gil_friendly(m, self.mutex)
+        self.__check_alive()
+        if value <= 0.0 or value > 1.0:
+            raise ValueError("render_scale must be in the range (0.0, 1.0]")
+        (<platformViewport*>self._platform).renderScale = value
+
+    @property
     def dpi(self) -> float:
         """
         Requested scaling (DPI) from the OS for this window.
