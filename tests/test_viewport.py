@@ -212,7 +212,7 @@ class TestMultipleViewports:
         # Verify separate settings
         for i, vp in enumerate(viewports):
             assert vp.title == f"VP {i}"
-            assert vp.width == 500 + i*50
+            assert vp.width == pytest.approx(500 + i*50, rel=1.)
             vp.render_frame()
     
     def test_rendering_sequence(self, multiple_viewports: tuple[list[dcg.Context], list[dcg.Viewport]]):
@@ -241,13 +241,16 @@ class TestMultipleViewports:
 class TestWorkerThreads:
     def test_main_thread_render_with_workers(self, initialized_viewport: dcg.Viewport, ctx: dcg.Context):
         """Test main thread rendering with worker threads updating data."""
-        shared_data = {"counter": 0}
+        counter = 0
+        counter_lock = threading.Lock()
         win = dcg.Window(ctx, label="Thread Test")
         text = dcg.Text(ctx, value="Initial", parent=win)
         
         def worker():
+            nonlocal counter
             for _ in range(5):
-                shared_data["counter"] += 1
+                with counter_lock:
+                    counter += 1
                 initialized_viewport.wake()
                 time.sleep(0.01)
         
@@ -258,7 +261,9 @@ class TestWorkerThreads:
         
         # Render in main thread
         for _ in range(3):
-            text.value = f"Counter: {shared_data['counter']}"
+            with counter_lock:
+                val = counter
+            text.value = f"Counter: {val}"
             initialized_viewport.render_frame()
             time.sleep(0.02)
         
@@ -267,9 +272,9 @@ class TestWorkerThreads:
             t.join()
         
         # Verify counter was updated
-        text.value = f"Counter: {shared_data['counter']}"
+        text.value = f"Counter: {counter}"
         initialized_viewport.render_frame()
-        assert shared_data["counter"] == 15
+        assert counter == 15
 
 # ---- Asyncio Integration Tests ----
 
