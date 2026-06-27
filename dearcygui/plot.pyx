@@ -2114,7 +2114,18 @@ cdef class Plot(uiItem):
         implot.GetInputMap().Menu = self._menu_button
         implot.GetInputMap().ZoomRate = self._zoom_rate
         implot.GetInputMap().PanMod = self._pan_modifier
-        implot.GetInputMap().ZoomMod = self._zoom_mod
+
+        # Fix for legend scroll causing plot zoom: When a popup window (like a legend popup)
+        # has captured the mouse and there's scroll input, temporarily disable zoom to prevent
+        # both the legend scroll and plot zoom from happening simultaneously.
+        cdef imgui.ImGuiIO io = imgui.GetIO()
+        if io.WantCaptureMouse and abs(io.MouseWheel) > 0.:
+            # Require an unlikely modifier combination to effectively disable zoom
+            # when mouse is captured by a popup/window
+            implot.GetInputMap().ZoomMod = imgui.ImGuiMod_Ctrl | imgui.ImGuiMod_Shift
+        else:
+            implot.GetInputMap().ZoomMod = self._zoom_mod
+
         implot.GetInputMap().OverrideMod = self._override_mod
         implot.GetInputMap().Select = self._select_button
         implot.GetInputMap().SelectCancel = self._select_cancel_button
